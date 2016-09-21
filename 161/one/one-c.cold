@@ -1,0 +1,20 @@
+#include <stdio.h>
+#include <math.h>
+
+int main(){
+	long lng = 136792;
+	char* ptr = &lng;
+
+	int i = 0;
+	int length = sizeof(lng);
+	int sum = 0;
+	//loop through 'length' times
+	while(i < length){
+		char c = *(ptr+i); //equivalent to ptr[i], but in bytes
+		int worth = c << (8*i); //multiply by 256^i for correct value of digit
+		sum += worth; //accumulate
+		printf("Content @ %#08x in hex: %x\tin decimal: %d\t worth: %d*16^%d = %d\n", ptr+i, c, c, c, i, worth);
+		i++;
+	}
+	printf("The sum is: %d\n", sum);
+}
