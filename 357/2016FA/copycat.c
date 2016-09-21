@@ -7,69 +7,96 @@
 
 int main(int argc, char** argv){
 
-	int in_fd = 0;
-	int out_fd = 1;
+// Load default values
+	int in_fd = STDIN_FILENO;
+    int out_fd = STDOUT_FILENO;
+	int buf_size = 512;
+    int arglength = 1; // Number of arguments that are not input sources
 
-	int buf_size = 1024;
-	char* buf;
-	
-	int files = 0;
-	char* filenames[argc];
+// Parse options
+    char opt;
+    while((opt = getopt(argc, argv, "b:o:")) != -1){
+        if(opt == 'o'){
+			out_fd = open(optarg, O_RDWR|O_CREAT|O_TRUNC, 0644);
+			if(out_fd < 0){
+                fprintf(stderr, "Failed to open file (%s) for writing: %s\n", optarg, strerror(errno));
+				exit(-1);
+			}
 
-	for(int i = 1; i < argc; i++){
-		char* arg = argv[i];
-		
-		if(!strncmp(arg, "-o", 2)){
-			arg = argv[++i];
-			out_fd = open(arg, O_WRONLY|O_CREAT|O_TRUNC, 0644);
+            arglength += 2; // There are now two more arguments
+        }else if(opt == 'b'){
+            buf_size = atoi(optarg);
+            if(buf_size < 1){
+                fprintf(stderr, "Invalid argument: buffer size must be greater than 0\n");
+                exit(-1);
+            }
 
-			/**** ERROR CHECKING ****/
-		}else if(!strncmp(arg, "-b", 2)){
-			arg = argv[++i];
+            arglength += 2; // There are now two more arguments
+        }else{
+// Getopt already produced its own errors
+            exit(-1);
+        }
+    }
 
-			/**** validation ****/
+	char* buf = malloc(buf_size);
 
-			buf_size = atoi(arg);
-		}else{
-			filenames[files++] = arg;
-		}
-	}
+// Loop inputs files
+    int i = !(argc == arglength);   // If there are no input sources (# of arguments == argv[0] and optional arguments), start from 0
+    char *a;
 
-	/** DEBUG **/
-	for(int a = 0; a < files; a++){
-		printf("%s ", filenames[a]);
-	}
-	printf("\n");
+	for(; i < argc; i++){
+        if(i == 0){                 // If start from 0, read from stdin
+            a = "-";
+        }else{
+            a = argv[i];
+        }
 
-	printf("Output file descriptor: %d\n", out_fd);
-	printf("Buffer size in bytes: %d\n", buf_size);
-	/** END DEBUG **/
+// If "-o" or "-b", skip this argument and the next
+        if(!strncmp(a, "-o", 2) || !strncmp(a, "-b", 2)){
+            i++;
+            continue;
+        }
+            
+// Open file
+        if(!strncmp(a, "-", 1)){
+            in_fd = STDIN_FILENO;
+        }else{  
+            in_fd = open(a, O_RDONLY);
+            if(in_fd < 0){
+                fprintf(stderr, "Could not open file (%s) for reading: %s\n", a, strerror(errno));
+                exit(-1);
+            }
+        }
 
-	buf = malloc(buf_size * sizeof(char));
+// Read and Write
+        int w = 0, r = read(in_fd, buf, buf_size);
+        if(r < 0){
+            fprintf(stderr, "Error occurred reading from file (%s): %s\n", a, strerror(errno));
+            exit(-1);
+        }
+        
+        while(r){
+            w = write(out_fd, buf, r);
+            if(w != r){                 // Write failed! (Partial write)
+                r -= w;                 // Calculate how much left
+                w = write(out_fd, buf+w, r); // Try again from new offset
+                
+                if(w != r){
+                    fprintf(stderr, "Error occurred writing to file (%s): %s\n", a, strerror(errno));
+                    exit(-1);
+                }
+            }
 
-	for(int f = 0; f < files; f++){
-		in_fd = open(filenames[f], O_RDONLY);
-
-		/** ERROR CHECKING **/
-		if(in_fd < 0){
-			fprintf(stderr, "Could not open file \'%s\' for reading:\n%s", filenames[f], strerror(errno));
-			return errno;
-		}
-
-		int c = 0;
-		while(c = read(in_fd, buf, 1024)){
-			write(out_fd, buf, c);
-		}
-
-		close(out_fd);
-	}
-
-	if(!files){
-		int c = 0;
-		while(c = read(0, buf, 1024)){
-			write(out_fd, buf, c);
-		}
+            r = read(in_fd, buf, buf_size);
+            if(r < 0){
+                fprintf(stderr, "Error occurred reading from file (%s): %s\n", a, strerror(errno));
+                exit(-1);
+            }
+        }
+        
+        close(in_fd);
 	}
 
 	free(buf);
+    close(out_fd);
 }
