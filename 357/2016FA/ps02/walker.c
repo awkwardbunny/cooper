@@ -31,18 +31,22 @@ int printinfo(struct stat s, char *p){      //given stat and pathname, prints en
 
     printf((mode & S_IRUSR) ? "r" : "-");
     printf((mode & S_IWUSR) ? "w" : "-");
-    if(mode & S_ISUID)
+    if((mode & S_ISUID) && (mode & S_IXUSR))
         printf("s");
     else if(mode & S_IXUSR)
         printf("x");
+    else if((mode & S_ISUID) && !(mode & S_IXUSR))
+        printf("S");
     else
         printf("-");
     printf((mode & S_IRGRP) ? "r" : "-");
     printf((mode & S_IWGRP) ? "w" : "-");
-    if(mode & S_ISGID)
+    if((mode & S_ISGID) && (mode & S_IXGRP))
         printf("s");
     else if(mode & S_IXGRP)
         printf("x");
+    else if((mode & S_IXGRP) && !(mode & S_IXGRP))
+        printf("S");
     else
         printf("-");
     printf((mode & S_IROTH) ? "r" : "-");
