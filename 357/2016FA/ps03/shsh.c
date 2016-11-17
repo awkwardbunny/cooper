@@ -58,6 +58,10 @@ void prompt(){
 }
 
 int process(char *line){
+    char line_bak[strlen(line)]; // dont need +1 because getting rid of \n
+    strncpy(line_bak, line, strlen(line));
+    line_bak[strlen(line) -1] = 0;
+
     char *argv_new[1024];
     int argc_new = 0;
 
@@ -125,22 +129,68 @@ int process(char *line){
         fprintf(stderr, "Error forking: %s\n", strerror(errno));
         return 1;
     }else if(!pid){
+        int fd_tmp;
 
-            //TODO: Implement redirects
             if(fn_rIn){
-                fprintf(stderr, "STDIN redirected from %s\n", fn_rIn);
+//                fprintf(stderr, "STDIN redirected from %s\n", fn_rIn);
+                if((fd_tmp = open(fn_rIn, O_RDONLY | 0666)) > 0){
+                    if(dup2(fd_tmp, 0) < 0){
+                        fprintf(stderr, "Error redirecting input from %s: %s\n", fn_rIn, strerror(errno));
+                        _exit(1);
+                    }
+                }else{
+                    fprintf(stderr, "Error opening input file %s: %s\n", fn_rIn, strerror(errno));
+                    _exit(1);
+                }
             }
 
             if(fn_rOut){
-                fprintf(stderr, "STDOUT redirected to %s\n", fn_rOut);
+//                fprintf(stderr, "STDOUT redirected to %s\n", fn_rOut);
+                if((fd_tmp = open(fn_rOut, O_RDWR | O_TRUNC | O_CREAT, 0666)) > 0){
+                    if(dup2(fd_tmp, 1) < 0){
+                        fprintf(stderr, "Error redirecting output to %s: %s\n", fn_rOut, strerror(errno));
+                        _exit(1);
+                    }
+                }else{
+                    fprintf(stderr, "Error opening output file %s: %s\n", fn_rOut, strerror(errno));
+                    _exit(1);
+                }
             }else if(fn_rOut_A){
-                fprintf(stderr, "STDOUTa redirected to %s\n", fn_rOut_A);
+//                fprintf(stderr, "STDOUTa redirected to %s\n", fn_rOut_A);
+                if((fd_tmp = open(fn_rOut_A, O_RDWR | O_APPEND | O_CREAT, 0666)) > 0){
+                    if(dup2(fd_tmp, 1) < 0){
+                        fprintf(stderr, "Error redirecting output to %s: %s\n", fn_rOut_A, strerror(errno));
+                        _exit(1);
+                    }
+                }else{
+                    fprintf(stderr, "Error opening output file %s: %s\n", fn_rOut_A, strerror(errno));
+                    _exit(1);
+                }
             }
 
             if(fn_rErr){
-                fprintf(stderr, "STDERR redirected to %s\n", fn_rErr);
+/* GODDAMNIT I was trying to fix a bug where redirected STDERR was empty only to realize 2 weeks later that there was nothing producing the errors */
+//                fprintf(stderr, "STDERR redirected to %s\n", fn_rErr);
+                if((fd_tmp = open(fn_rErr, O_RDWR | O_TRUNC | O_CREAT, 0666)) > 0){
+                    if(dup2(fd_tmp, 2) < 0){
+                        fprintf(stderr, "Error redirecting errors to %s: %s\n", fn_rErr, strerror(errno));
+                        _exit(1);
+                    }
+                }else{
+                    fprintf(stderr, "Error opening output error file %s: %s\n", fn_rErr, strerror(errno));
+                    _exit(1);
+                }
             }else if(fn_rErr_A){
-                fprintf(stderr, "STDERRa redirected to %s\n", fn_rErr_A);
+//                fprintf(stderr, "STDERRa redirected to %s\n", fn_rErr_A);
+                if((fd_tmp = open(fn_rErr_A, O_RDWR | O_APPEND | O_CREAT, 0666)) > 0){
+                    if(dup2(fd_tmp, 2) < 0){
+                        fprintf(stderr, "Error redirecting errors to %s: %s\n", fn_rErr_A, strerror(errno));
+                        _exit(1);
+                    }
+                }else{
+                    fprintf(stderr, "Error opening output error file %s: %s\n", fn_rErr_A, strerror(errno));
+                    _exit(1);
+                }
             }
 
             if(execvp(argv_new[0], argv_new) < 0){
@@ -149,20 +199,26 @@ int process(char *line){
             }
     }else{
         int wstatus = 0;
-            if(waitpid(pid, &wstatus, 0) < 0){
-                fprintf(stderr, "Error wait3 on pid %d: %s\n", pid, strerror(errno));
-                return 1;
-            }else{
-                //command done
-                if(gettimeofday(&e_time, NULL) < 0){
-                    fprintf(stderr, "Error getting end time: %s\n", strerror(errno));
-                    exit(1);
-                }
-
-                //TODO: print times
-
-                if(wstatus) return 1;
+        struct timeval dTime;
+        struct rusage ru;
+        if(wait4(pid, &wstatus, 0, &ru) < 0){
+            fprintf(stderr, "Error wait3 on pid %d: %s\n", pid, strerror(errno));
+            return 1;
+        }else{
+            //command done
+            if(gettimeofday(&e_time, NULL) < 0){
+                fprintf(stderr, "Error getting end time: %s\n", strerror(errno));
+                exit(1);
             }
+
+            timersub(&e_time, &s_time, &dTime);
+            fprintf(stderr, "Command \'%s\' returned %d\n", line_bak, WEXITSTATUS(wstatus));
+            fprintf(stderr, "Real time:\t%01d.%03ds\n", dTime.tv_sec, dTime.tv_usec);
+            fprintf(stderr, "System time:\t%01d.%03ds\n", ru.ru_stime.tv_sec, ru.ru_stime.tv_usec);
+            fprintf(stderr, "User time:\t%01d.%03ds\n", ru.ru_utime.tv_sec, ru.ru_utime.tv_usec);
+
+            if(WEXITSTATUS(wstatus)) return 1;
+        }
     }
 
     return 0;
