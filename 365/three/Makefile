@@ -20,7 +20,7 @@ graph.o: graph.cpp graph.h
 #   $(CC) $(CFLAGS) -g -o dijkstraDebug dijkstra.cpp heap.cpp hash.cpp graph.cpp
 
 clean:
-	rm -f *.exe *.o *.stackdump *~ dijkstra
+	rm -f *.exe *.o *.stackdump *~ 
 
 backup:
 	test -d backups || mkdir backups
