@@ -10,6 +10,7 @@
 #include <fstream>
 #include <string>
 #include <cstdlib>
+#include <unistd.h>
 
 #include "graph.h"
 
@@ -77,14 +78,14 @@ int main()
     }
 
     // Get starting time
-    clock_t t_end = clock();
+    clock_t t_start = clock();
     g.dijkstra(v_start);
     // Get end time
-    clock_t t_start = clock();
+    clock_t t_end = clock();
 
     // Calculate time difference and print
-    double t_diff = ((double) (t_end-t_start)) / CLOCKS_PER_SEC;
-    cout << "Total time (in seconds) to apply Dijkstra's algorithm: " << t_diff << endl;
+    //double t_diff = ((double)(t_end-t_start)) / CLOCKS_PER_SEC;
+    cout << "Total time (in seconds) to apply Dijkstra's algorithm: " << double((t_end-t_start))/CLOCKS_PER_SEC << endl;
 
     // Print output to file
     string fn_output;
