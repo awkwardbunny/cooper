@@ -1,6 +1,7 @@
 #include <sys/time.h>
 #include <sys/mman.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
@@ -9,22 +10,61 @@
 #include "savectx64.h"
 #include "sched.h"
 
-struct savectx exited;
+struct savectx exited; // Context to be used when init_fn 'returns'
+sigset_t blockset; // Set of signals to block
 
 void print_test(){
-    int a;
-    printf("%x\n", &a);
-    for(a = 0; a < 2; a++)
-        printf("Hello world!\n");
+    printf("Hello world!\n");
 
-    restorectx(&exited, 0);
+    for(int i = 0; i < 5; i++){
+        switch(sched_fork()){
+            case -1:
+                fprintf(stderr, "Fork failed wtf\n");
+                fprintf(stderr, "Errnom is %d: %s", errnom, strerror(errno));
+                _return;
+            case 0:
+                printf("Hello world from child %d\n", sched_getpid());
+                if(sched_getpid() == 3) sched_nice(-1);
+                if(sched_getpid() == 6) sched_nice(-4);
+                break;
+            default:
+                printf("Continue to fork from %d\n", sched_getpid());
+                continue;
+        }
+        break;
+    }
+
+/*
+    if(!sched_fork()){
+        printf("ASD\n");
+        sched_exit(3);
+    }else{
+        printf("1\n");
+        for(int i = 0; i < 1000000000; i++){}
+        printf("2\n");
+
+        int cp = 0;
+        //printf("sched_wait returned %d from pid %d\n", sched_wait(&cp), cp);
+    }
+*/
+
+    while(1);
+
+    _return; // MACRO defined in sched.h
 }
 
 int main(int argc, char **argv){
     sched_init(print_test);
-}
+    fprintf(stderr, "Error: sched_init() returned!!!\n");
+    exit(-1);
+} 
 
 int sched_init(void (*init_fn)()){
+    // Set the signal set structs
+    if(sigfillset(&blockset) < 0){
+        fprintf(stderr, "Error: could not set signals.\n");
+        exit(-1);
+    }
 
     // Set Interval Timer
     struct itimerval itv_new;
@@ -35,12 +75,6 @@ int sched_init(void (*init_fn)()){
 
     if(setitimer(ITIMER_VIRTUAL, &itv_new, NULL) < 0){
         fprintf(stderr, "Error: setitimer() failed: %s\n", strerror(errno));
-        exit(-1);
-    }
-
-    // Set Timer Handler to sched_tick
-    if(signal(SIGVTALRM, sched_tick) == SIG_ERR){
-        fprintf(stderr, "Error: signal() setting SIGVTALRM handler failed: %s\n", strerror(errno));
         exit(-1);
     }
 
@@ -59,22 +93,21 @@ int sched_init(void (*init_fn)()){
     struct sched_proc p_init;
     p_init.task_state = SCHED_RUNNING;
     p_init.ticks = 0;
-    p_init.priority = 0;
+    p_init.nice = DEF_NICE;
+    p_init.priority = DEF_NICE + 20;
+    p_init.sp_begin = sp_new;
+    p_init.exit_code = 0;
+    p_init.timeslice = DEF_TSLICE;
     p_init.ppid = 1;
     p_init.pid = 1; // could've also used sched_newpid()
     pid_table[1] = 1;
-    p_init.sp_begin = sp_new;
 
     // Create a new context and modify for the new process
     struct savectx new;
     savectx(&new);
-    new.regs[JB_BP] = sp_new+STACK_SIZE-8;
-    new.regs[JB_SP] = sp_new+STACK_SIZE-8;
+    new.regs[JB_BP] = sp_new+STACK_SIZE;
+    new.regs[JB_SP] = sp_new+STACK_SIZE;
     new.regs[JB_PC] = init_fn;
-
-    *((int *)sp_new + 4) = 1;
-
-    printf("%x:%x\n", sp_new, sp_new+STACK_SIZE);
 
     // Set the current pointer
     current = &p_init;
@@ -84,14 +117,46 @@ int sched_init(void (*init_fn)()){
     savectx(&exited);
     exited.regs[JB_PC] = &&init_fn_returned; // GCC specific: && gets address of label
 
-    printf("ASHD\n");
+    // Initialize the running queue (and insert current process)
+    struct sched_node anchor;
+    anchor.process = NULL;
+    run_anchor = &anchor;
+//    anchor.prev = &anchor;
+//    anchor.next = &anchor;
+    // Skip above lines, go directly to
+    struct sched_node pn_init;
+    anchor.prev = &pn_init;
+    anchor.next = &pn_init;
+    pn_init.prev = &anchor;
+    pn_init.next = &anchor;
+    pn_init.process = &p_init;
+    p_init.mynode = &pn_init;
+
+    // Initialize children list
+    struct sched_node pn_children;
+    pn_children.process = NULL;
+    pn_children.next = &pn_children;
+    pn_children.prev = &pn_children;
+    p_init.children = &pn_children;
+
+    // Set Timer Handler to sched_tick
+    if(signal(SIGVTALRM, sched_tick) == SIG_ERR){
+        fprintf(stderr, "Error: signal() setting SIGVTALRM handler failed: %s\n", strerror(errno));
+        exit(-1);
+    }
+
+    // Set Abort Handler to sched_ps
+    if(signal(SIGABRT, sched_ps) == SIG_ERR){
+        fprintf(stderr, "Error: signal() setting SIGABRT handler failed: %s\n", strerror(errno));
+        exit(-1);
+    }
 
     // Pass execution to init_fn
     restorectx(&new, 0);
 
 init_fn_returned:
     fprintf(stderr, "Error: init_fn() returned! PANICCCCCC\n");
-    exit(-1);
+    return -1;
 }
 
 unsigned int sched_newpid(){
@@ -102,35 +167,182 @@ unsigned int sched_newpid(){
     return i;
 }
 
-int sched_fork(){
-    /* create a new simulated task which is a copy of the caller.
-    Allocated a new pid for the child, and make runnable and eligible
-    to be scheduled. it returns 0 to child and stuff. not required that
-    relative order of parent vs child be defined. -1 on error
-    Do not need to duplicate entire address space. parent & child
-    will execute in the same space. however, need to create a new
-    private stack area and init to be a copy of the parent's */
+unsigned int sched_fork(){
+    sigset_t origset; // Original set of signals that were blocked
+
+    // Block all signals
+    if(sigprocmask(SIG_BLOCK, &blockset, &origset) < 0){
+        errnom = E_SIGMASK;
+        return -1;
+    }
+
+    // Create and copy a new sched_proc
+    struct sched_proc *p_child = malloc(sizeof(struct sched_proc));
+    memcpy(p_child, current, sizeof(struct sched_proc));
+    p_child->ppid = current->pid;
+    p_child->task_state = SCHED_READY;
+    p_child->pid = sched_newpid();
+    if(!p_child->pid){
+        free(p_child);
+        errnom = E_NOPID;
+        return -1;
+    }
+
+    // Create a new stack area
+    void *sp_new;
+    if((sp_new = mmap(0, STACK_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0)) == MAP_FAILED){
+        errnom = E_MMAP;
+        return -1;;
+    }
+
+    // Save context; if scheduled in, then it is currently in child, return 0
+    if(savectx(&(p_child->ctx)) == SCHED_IN){
+        sigprocmask(SIG_SETMASK, &origset, NULL);
+        return 0;
+    }
+
+    // Copy the parent's stack over
+    memcpy(sp_new, current->sp_begin, STACK_SIZE);
+
+    // Fix new stack
+    unsigned long offset = sp_new - current->sp_begin;
+    p_child->sp_begin = sp_new;
+    p_child->ctx.regs[JB_SP] += offset;
+    p_child->ctx.regs[JB_BP] += offset;
+    adjstack(p_child->ctx.regs[JB_SP], (p_child->sp_begin)+STACK_SIZE, offset);
+
+    // Add to run queue
+    struct sched_node *pn_child = malloc(sizeof(struct sched_node));
+    pn_child->process = p_child;
+    pn_child->next = current->mynode->next;
+    pn_child->prev = current->mynode;
+    current->mynode->next = pn_child;
+    pn_child->next->prev = pn_child;
+
+    // Initialize children list
+    struct sched_node *pn_children = malloc(sizeof(struct sched_node));
+    pn_children->process = NULL;
+    pn_children->prev = pn_children;
+    pn_children->next = pn_children;
+
+    // Add to children list of the parent(current)
+    struct sched_node *pn_child2 = malloc(sizeof(struct sched_node));
+    pn_child2->process = p_child;
+    pn_child2->next = current->children->next;
+    pn_child2->prev = current->children;
+    current->children->next = pn_child2;
+    pn_child2->next->prev = pn_child2;
+
+    // Set original sigset back
+    if(sigprocmask(SIG_SETMASK, &origset, NULL) < 0){
+        errnom = E_SIGUMASK;
+        free(pn_child);
+        free(pn_child2);
+        free(pn_children);
+        // Well fuck it, if it can't unblock, its a fatal error and
+        // wherever fork returns to should error check and terminate;
+        return -1;
+    };
+
+    return p_child->pid;
 }
 
-int sched_exit(int code){
-    /* terminate current task, making it a ZOMBIE, and store the exit code.
-    if a parent is sleeping in sched_wait(), wake it up and return the exit
+void sched_exit(int code){
+    // Should I let this return?
+    // Problem set states that it shouldn't exit/return, so doesn't matter
+    if(current->pid == 1){
+        _return;
+    }
+
+    // Original set of signals that were blocked
+    sigset_t origset;
+
+    // Block all signals
+    sigprocmask(SIG_BLOCK, &blockset, &origset);
+/*
+    // Set its values
+    current->task_state = SCHED_ZOMBIE;
+    current->exit_code = code;
+    pid_table[current->pid] = 0;
+
+    printf("3\n");
+
+    // Re-parent children, if any
+    if(current->children->next->process){
+        struct sched_node *node = current->children;
+        for(node = node->next; node->process; node = node->next){
+            node->process->ppid = current->ppid;
+            node->process->parent = current->parent;
+        }
+
+        current->children->next->prev = current->parent->children;
+    printf("5\n");
+        current->children->prev->next = current->parent->children->next;
+        current->parent->children->next->prev = current->children->prev;
+        current->parent->children->next = current->children->next;
+    }
+    printf("4\n");
+
+    // TODO
+    if(current->parent->task_state == SCHED_SLEEPING){
+        current->parent->task_state = SCHED_RUNNING;
+        restorectx(&current->parent->ctx, code);
+    }
+
+    sched_switch();
+    */
+    sigprocmask(SIG_SETMASK, &origset, NULL);
+
+    /* if a parent is sleeping in sched_wait(), wake it up and return the exit
     code of it. there will be no equivalent of SIGCHILD. sched_exit will not
     return. another runnable process will be scheduled. */
 }
 
 int sched_wait(int *exit_code){
+
+    // Original set of signals that were blocked
+    sigset_t origset;
+
+    // Block all signals
+    sigprocmask(SIG_BLOCK, &blockset, &origset);
+/*
+    // If there are ZOMBIE children
+    int zomb = 0;
+    struct sched_node *node = current->children;
+    for(node = node->next; node->process; node = node->next){
+        if(node->process->task_state == SCHED_ZOMBIE){
+            zomb = 1;
+            break;
+        }
+    }
+
+    if(!zomb){
+        current->task_state = SCHED_SLEEPING;
+
+    }
+    
+    *exit_code = node->process->exit_code;
+    sigprocmask(SIG_SETMASK, &origset, NULL);
+    return node->process->pid;
+*/
+    sigprocmask(SIG_SETMASK, &origset, NULL);
+    return 0;
+
     /* return the exit code of a zombie child and free the resources of
     that child. if there is more tha one such child, the order in which
     the codes are returned is not defined. if none, but has at least one
     child, place caller in SLEEPING. to be woken up when a child calls
     sched_exit(). no children, return immediately with -1, otherwise
-    return value is the pid of the child whose statuss is being returned.
-    since no simulated signals, exit code is simply integer from sched_exit */
+    return value is the pid of the child whose statuss is being returned.  since no simulated signals, exit code is simply integer from sched_exit */
 }
 
-int sched_nice(int niceval){
-    /* set current task's nice value to param. from +19 to -20. clamp */
+void sched_nice(int niceval){
+    if(niceval > 19)
+        current->nice = 19;
+    else if(niceval > -21)
+        current->nice = niceval;
+    else
+        current->nice = -20;
 }
 
 unsigned int sched_getpid(){
@@ -145,34 +357,91 @@ unsigned int sched_gettick(){
     return current->ticks;
 }
 
-int sched_ps(){
-    /* output to stderr a listing of all of the current tasks, including
-    sleeping and zombie tasks. list the following information in tabular form:
-        pid
-        ppid
-        current state
-        base addr of private stack area
-        static priority
-        dynamic priority info
-        total CPU time used (in ticks)
-    dynamic priority will vary in interpretation and range depending on what
-    scheduling algorithm used. ex. CFS -> vruntime will be the best indicator. */
-    /* this should be sighandler for SIGABRT so that a ps can be forced at any
-    time by sending the testbed SIGABRT */
+void sched_ps(int blah){
+    fprintf(stderr, "PID\tPPID\tSTATE\tSTACK BASE\tNICE\tPRIOR\tTICKS\n");
+    struct sched_node *node = run_anchor;
+    for(node = node->next; node->process; node = node->next){
+        fprintf(stderr, "%d\t%d\t", node->process->pid, node->process->ppid);
+        
+        switch(node->process->task_state){
+            case SCHED_READY:
+                fprintf(stderr, "READY\t");
+                break;
+            case SCHED_RUNNING:
+                fprintf(stderr, "RUNNING\t");
+                break;
+            case SCHED_SLEEPING:
+                fprintf(stderr, "SLEEPING\t");
+                break;
+            case SCHED_ZOMBIE:
+                fprintf(stderr, "ZOMBIEE\t");
+        }
+
+        fprintf(stderr, "%p\t%d\t%d\t%d\n", node->process->sp_begin, node->process->nice, node->process->priority, node->process->ticks);
+    }
 }
 
 int sched_switch(){
-    /* never be called directly by the testbed. the only place where a
-    context switch is made, analogous to schedule(). should place current
-    on the run queue then select the best READY and put in RUNNING state
-    and context switch */
+    sigset_t origset; // Original set of signals that were blocked
+
+    // Block all signals
+    sigprocmask(SIG_BLOCK, &blockset, &origset);
+
+    // Pick next READY process
+
+    /* Picks the process with the highest priority    *
+     * that still has a non-zero timeslice left.      *
+     * If none of processes have a nonzero timeslice, *
+     * the_chosen_one remains NULL and loop once more *
+     * after (or as) timeslices are reset             */
+     
+    unsigned int max_prior = 0;
+    struct sched_proc *the_chosen_one = NULL;
+
+    struct sched_node *node = run_anchor;
+    for(node = node->next; node->process; node = node->next){
+        // Update the priorities
+        /* Priority is inverse of nice value with
+                nice=19  --> prior=0 and
+                nice=-20 --> prior=39                */
+        node->process->priority = (-1)*node->process->nice+19;
+
+        if(node->process->priority > max_prior && node->process->timeslice){
+            max_prior = node->process->priority;
+            the_chosen_one = node->process;
+        }
+    }
+
+    // Case described above where no processes have timeslices left
+    if(!the_chosen_one){
+        for(node = node->next; node->process; node = node->next){ node->process->timeslice = DEF_TSLICE; // MEH
+
+            if(node->process->priority > max_prior){
+                max_prior = node->process->priority;
+                the_chosen_one = node->process;
+            }
+        }
+    }
+
+    // By here, the_chosen_one should not be NULL
+    // Unless something went horribly wrong
+    // Save context and then restore to new process
+    if(savectx(&(current->ctx)) != SCHED_IN){
+        the_chosen_one->task_state = SCHED_RUNNING;
+        current = the_chosen_one;
+
+        restorectx(&(the_chosen_one->ctx), SCHED_IN);
+    }
+
+    // Unblock signals
+    sigprocmask(SIG_SETMASK, &origset, NULL);
 }
 
 void sched_tick(int blah){
-    /* sighandler for SIGVTALRM signal gen by the periodic timer
-    examine currently running task and if its time slice just expired,
-    mark that task as READY, place on run queue, and then call sched_switch()
-    watch out for signal mask issues. remember SIGVTALRM will be by default
-    masked on entry to sighandler */
+    current->ticks++;
+    if(--(current->timeslice) == 0){
+        current->task_state = SCHED_READY;
+        sched_switch();
+    }
 }
 
