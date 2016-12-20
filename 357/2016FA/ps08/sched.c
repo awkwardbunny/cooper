@@ -25,8 +25,8 @@ void print_test(){
             case 0:
                 printf("Hello world from child %d\n", sched_getpid());
                 if(sched_getpid() == 3) sched_nice(-1);
-                if(sched_getpid() == 6) sched_nice(-4);
-                if(sched_getpid() == 4){
+                else if(sched_getpid() == 6) sched_nice(-4);
+                else if(sched_getpid() == 4){
                     if(sched_fork()){
                         sched_exit(101);
                     }
@@ -52,6 +52,13 @@ void print_test(){
         //printf("sched_wait returned %d from pid %d\n", sched_wait(&cp), cp);
     }
 */
+    if(sched_getpid() == 1){
+        int ret;
+        int pa = sched_wait(&ret);
+        while(pa = sched_wait(&ret)){
+            printf("Child process %d returned %d\n", pa, ret);
+        }
+    }
 
     while(1);
 
@@ -173,7 +180,8 @@ unsigned int sched_newpid(){
 }
 
 unsigned int sched_fork(){
-    sigset_t origset; // Original set of signals that were blocked
+    // Original set of signals that were blocked
+    sigset_t origset;
 
     // Block all signals
     if(sigprocmask(SIG_BLOCK, &blockset, &origset) < 0){
@@ -242,8 +250,7 @@ unsigned int sched_fork(){
     pn_children->next = pn_children;
 
     // Add to children list of the parent(current)
-    struct sched_node *pn_child2 = malloc(sizeof(struct sched_node));
-    pn_child2->process = p_child;
+    struct sched_node *pn_child2 = malloc(sizeof(struct sched_node)); pn_child2->process = p_child;
     pn_child2->next = current->children->next;
     pn_child2->prev = current->children;
     current->children->next = pn_child2;
@@ -265,7 +272,7 @@ unsigned int sched_fork(){
 
 void sched_exit(int code){
     // Should I let this return?
-    // Problem set states that it shouldn't exit/return, so doesn't matter
+    // Problem set states that init_fn shouldn't exit/return, so doesn't matter
     if(current->pid == 1){
         _return;
     }
@@ -281,11 +288,8 @@ void sched_exit(int code){
     current->exit_code = code;
     pid_table[current->pid] = 0;
 
-    printf("In exit\n");
-
     // Re-parent children, if any
     if(current->children->next->process){
-        printf("Shouldnt be here\n");
         struct sched_node *node = current->children;
         for(node = node->next; node->process; node = node->next){
             node->process->ppid = current->ppid;
@@ -299,7 +303,10 @@ void sched_exit(int code){
         current->parent->children->prev = current->children->prev;
     }
 
+    printf("in exit(), my parent is %d\n", current->parent->pid);
+    // If there's a parent waiting, set it READY
     if(current->parent->task_state == SCHED_SLEEPING){
+        printf("ALDSJSDA\n");
         current->parent->task_state = SCHED_READY;
     }
 
@@ -310,41 +317,78 @@ void sched_exit(int code){
 }
 
 int sched_wait(int *exit_code){
+    // If there are no children, return -1
+    if(!current->children->next->process){
+        return -1;
+    }
 
     // Original set of signals that were blocked
     sigset_t origset;
 
     // Block all signals
     sigprocmask(SIG_BLOCK, &blockset, &origset);
-/*
+
     // If there are ZOMBIE children
-    int zomb = 0;
     struct sched_node *node = current->children;
     for(node = node->next; node->process; node = node->next){
         if(node->process->task_state == SCHED_ZOMBIE){
-            zomb = 1;
-            break;
+            *exit_code = node->process->exit_code;
+            int c_pid = node->process->pid;
+
+            // Unlink node from children link
+            node->next->prev = node->prev;
+            node->prev->next = node->next;
+
+            // Unlink node from run_queue
+            node->process->mynode->next->prev = node->process->mynode->prev;
+            node->process->mynode->prev->next = node->process->mynode->next;
+
+            // Unmap and free all stuff
+            munmap(node->process->sp_begin, STACK_SIZE);
+            free(node->process->mynode);
+            free(node->process);
+            free(node);
+
+            sigprocmask(SIG_SETMASK, &origset, NULL);
+            return c_pid;
         }
     }
 
-    if(!zomb){
+    // If there are no ZOMBIE children
+    // Put to sleep and switch
+    // BUG HERE?!
+    int bh = 0;
+    if((bh=savectx(&(current->ctx))) != SCHED_IN){
+        printf("%d\n", bh);
         current->task_state = SCHED_SLEEPING;
-
+        sched_switch();
     }
-    
-    *exit_code = node->process->exit_code;
-    sigprocmask(SIG_SETMASK, &origset, NULL);
-    return node->process->pid;
-*/
-    sigprocmask(SIG_SETMASK, &origset, NULL);
-    return 0;
 
-    /* return the exit code of a zombie child and free the resources of
-    that child. if there is more tha one such child, the order in which
-    the codes are returned is not defined. if none, but has at least one
-    child, place caller in SLEEPING. to be woken up when a child calls
-    sched_exit(). no children, return immediately with -1, otherwise
-    return value is the pid of the child whose statuss is being returned.  since no simulated signals, exit code is simply integer from sched_exit */
+    // There should be dead child(ren) by here now
+    // Same code as above
+    node = current->children;
+    for(node = node->next; node->process; node = node->next){
+        if(node->process->task_state == SCHED_ZOMBIE){
+            *exit_code = node->process->exit_code;
+            int c_pid = node->process->pid;
+
+            // Unlink node from children link
+            node->next->prev = node->prev;
+            node->prev->next = node->next;
+
+            // Unlink node from run_queue
+            node->process->mynode->next->prev = node->process->mynode->prev;
+            node->process->mynode->prev->next = node->process->mynode->next;
+
+            // Unmap and free all stuff
+            munmap(node->process->sp_begin, STACK_SIZE);
+            free(node->process->mynode);
+            free(node);
+
+            sigprocmask(SIG_SETMASK, &origset, NULL);
+            return c_pid;
+        }
+    }
 }
 
 void sched_nice(int niceval){
@@ -369,12 +413,14 @@ unsigned int sched_gettick(){
 }
 
 void sched_ps(int blah){
+/* For testing exit's re-parenting
     fprintf(stderr, "Init's children: ");
     struct sched_node *abc = run_anchor->next->process->children;
     for(abc = abc->next; abc->process; abc = abc->next){
         fprintf(stderr, "%d ", abc->process->pid);
     }
     fprintf(stderr, "\n");
+*/
 
     fprintf(stderr, "PID\tPPID\tSTATE\tSTACK BASE\tNICE\tPRIOR\tTICKS\n");
     struct sched_node *node = run_anchor;
@@ -389,7 +435,7 @@ void sched_ps(int blah){
                 fprintf(stderr, "RUNNING\t");
                 break;
             case SCHED_SLEEPING:
-                fprintf(stderr, "SLEEPING\t");
+                fprintf(stderr, "SLPING\t"); // SLEEPING is too long
                 break;
             case SCHED_ZOMBIE:
                 fprintf(stderr, "ZOMBIE\t");
@@ -400,6 +446,8 @@ void sched_ps(int blah){
 }
 
 int sched_switch(){
+    printf("currently in %d\n", current->pid);
+    sched_ps(0);
     sigset_t origset; // Original set of signals that were blocked
 
     // Block all signals
@@ -424,6 +472,7 @@ int sched_switch(){
                 nice=-20 --> prior=39                */
         node->process->priority = (-1)*node->process->nice+19;
 
+        // Dynamic priority is implemented through both priority and timeslice
         if(node->process->task_state == SCHED_READY && node->process->priority > max_prior && node->process->timeslice){
             max_prior = node->process->priority;
             the_chosen_one = node->process;
@@ -435,6 +484,7 @@ int sched_switch(){
         for(node = node->next; node->process; node = node->next){
             node->process->timeslice = DEF_TSLICE; // MEH
 
+            // Dynamic priority is implemented through both priority and timeslice
             if(node->process->task_state == SCHED_READY && node->process->priority > max_prior){
                 max_prior = node->process->priority;
                 the_chosen_one = node->process;
