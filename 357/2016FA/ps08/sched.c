@@ -26,6 +26,11 @@ void print_test(){
                 printf("Hello world from child %d\n", sched_getpid());
                 if(sched_getpid() == 3) sched_nice(-1);
                 if(sched_getpid() == 6) sched_nice(-4);
+                if(sched_getpid() == 4){
+                    if(sched_fork()){
+                        sched_exit(101);
+                    }
+                }
                 break;
             default:
                 printf("Continue to fork from %d\n", sched_getpid());
@@ -180,6 +185,7 @@ unsigned int sched_fork(){
     struct sched_proc *p_child = malloc(sizeof(struct sched_proc));
     memcpy(p_child, current, sizeof(struct sched_proc));
     p_child->ppid = current->pid;
+    p_child->parent = current;
     p_child->task_state = SCHED_READY;
     p_child->pid = sched_newpid();
     if(!p_child->pid){
@@ -214,13 +220,23 @@ unsigned int sched_fork(){
     // Add to run queue
     struct sched_node *pn_child = malloc(sizeof(struct sched_node));
     pn_child->process = p_child;
-    pn_child->next = current->mynode->next;
-    pn_child->prev = current->mynode;
-    current->mynode->next = pn_child;
-    pn_child->next->prev = pn_child;
+    p_child->mynode = pn_child;
+
+    // Below adds to end of queue
+    pn_child->next = run_anchor;
+    pn_child->prev = run_anchor->prev;
+    run_anchor->prev = pn_child;
+    pn_child->prev->next = pn_child;
+
+    // Below adds to right after current
+//    pn_child->next = current->mynode->next;
+//    pn_child->prev = current->mynode;
+//    current->mynode->next = pn_child;
+//    pn_child->next->prev = pn_child;
 
     // Initialize children list
     struct sched_node *pn_children = malloc(sizeof(struct sched_node));
+    p_child->children = pn_children;
     pn_children->process = NULL;
     pn_children->prev = pn_children;
     pn_children->next = pn_children;
@@ -259,43 +275,38 @@ void sched_exit(int code){
 
     // Block all signals
     sigprocmask(SIG_BLOCK, &blockset, &origset);
-/*
+
     // Set its values
     current->task_state = SCHED_ZOMBIE;
     current->exit_code = code;
     pid_table[current->pid] = 0;
 
-    printf("3\n");
+    printf("In exit\n");
 
     // Re-parent children, if any
     if(current->children->next->process){
+        printf("Shouldnt be here\n");
         struct sched_node *node = current->children;
         for(node = node->next; node->process; node = node->next){
             node->process->ppid = current->ppid;
             node->process->parent = current->parent;
         }
 
-        current->children->next->prev = current->parent->children;
-    printf("5\n");
-        current->children->prev->next = current->parent->children->next;
-        current->parent->children->next->prev = current->children->prev;
-        current->parent->children->next = current->children->next;
+        // Link children to parent
+        current->children->prev->next = current->parent->children;
+        current->children->next->prev = current->parent->children->prev;
+        current->parent->children->prev->next = current->children->next;
+        current->parent->children->prev = current->children->prev;
     }
-    printf("4\n");
 
-    // TODO
     if(current->parent->task_state == SCHED_SLEEPING){
-        current->parent->task_state = SCHED_RUNNING;
-        restorectx(&current->parent->ctx, code);
+        current->parent->task_state = SCHED_READY;
     }
 
-    sched_switch();
-    */
+    sched_switch(); // This should not return
+    fprintf(stderr, "Error: sched_exit() returned????\n");
     sigprocmask(SIG_SETMASK, &origset, NULL);
-
-    /* if a parent is sleeping in sched_wait(), wake it up and return the exit
-    code of it. there will be no equivalent of SIGCHILD. sched_exit will not
-    return. another runnable process will be scheduled. */
+    _return;
 }
 
 int sched_wait(int *exit_code){
@@ -358,6 +369,13 @@ unsigned int sched_gettick(){
 }
 
 void sched_ps(int blah){
+    fprintf(stderr, "Init's children: ");
+    struct sched_node *abc = run_anchor->next->process->children;
+    for(abc = abc->next; abc->process; abc = abc->next){
+        fprintf(stderr, "%d ", abc->process->pid);
+    }
+    fprintf(stderr, "\n");
+
     fprintf(stderr, "PID\tPPID\tSTATE\tSTACK BASE\tNICE\tPRIOR\tTICKS\n");
     struct sched_node *node = run_anchor;
     for(node = node->next; node->process; node = node->next){
@@ -374,7 +392,7 @@ void sched_ps(int blah){
                 fprintf(stderr, "SLEEPING\t");
                 break;
             case SCHED_ZOMBIE:
-                fprintf(stderr, "ZOMBIEE\t");
+                fprintf(stderr, "ZOMBIE\t");
         }
 
         fprintf(stderr, "%p\t%d\t%d\t%d\n", node->process->sp_begin, node->process->nice, node->process->priority, node->process->ticks);
@@ -406,7 +424,7 @@ int sched_switch(){
                 nice=-20 --> prior=39                */
         node->process->priority = (-1)*node->process->nice+19;
 
-        if(node->process->priority > max_prior && node->process->timeslice){
+        if(node->process->task_state == SCHED_READY && node->process->priority > max_prior && node->process->timeslice){
             max_prior = node->process->priority;
             the_chosen_one = node->process;
         }
@@ -414,9 +432,10 @@ int sched_switch(){
 
     // Case described above where no processes have timeslices left
     if(!the_chosen_one){
-        for(node = node->next; node->process; node = node->next){ node->process->timeslice = DEF_TSLICE; // MEH
+        for(node = node->next; node->process; node = node->next){
+            node->process->timeslice = DEF_TSLICE; // MEH
 
-            if(node->process->priority > max_prior){
+            if(node->process->task_state == SCHED_READY && node->process->priority > max_prior){
                 max_prior = node->process->priority;
                 the_chosen_one = node->process;
             }
