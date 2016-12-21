@@ -39,9 +39,9 @@ struct sched_node {
     struct sched_proc *process;
 };
 
-struct sched_waitq {};
+struct sched_waitq {}; // NOT USED
 
-struct sched_node *run_anchor;
+struct sched_node *run_anchor; // 'run' queue, but stores all the processes
 struct sched_proc *current;
 unsigned short int pid_table[SCHED_NPROC + 1];
 
