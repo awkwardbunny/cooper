@@ -39,25 +39,15 @@ void print_test(){
         break;
     }
 
-/*
-    if(!sched_fork()){
-        printf("ASD\n");
-        sched_exit(3);
-    }else{
-        printf("1\n");
-        for(int i = 0; i < 1000000000; i++){}
-        printf("2\n");
-
-        int cp = 0;
-        //printf("sched_wait returned %d from pid %d\n", sched_wait(&cp), cp);
-    }
-*/
     if(sched_getpid() == 1){
         int ret;
-        int pa = sched_wait(&ret);
-        while(pa = sched_wait(&ret)){
+        int pa;
+        while((pa = sched_wait(&ret)) != -1){
             printf("Child process %d returned %d\n", pa, ret);
         }
+    }else{
+        while(current->ticks < (current->pid*5)+20){}
+        sched_exit(sched_getpid());
     }
 
     while(1);
@@ -106,7 +96,7 @@ int sched_init(void (*init_fn)()){
     p_init.task_state = SCHED_RUNNING;
     p_init.ticks = 0;
     p_init.nice = DEF_NICE;
-    p_init.priority = DEF_NICE + 20;
+    p_init.priority = 19;
     p_init.sp_begin = sp_new;
     p_init.exit_code = 0;
     p_init.timeslice = DEF_TSLICE;
@@ -303,10 +293,8 @@ void sched_exit(int code){
         current->parent->children->prev = current->children->prev;
     }
 
-    printf("in exit(), my parent is %d\n", current->parent->pid);
     // If there's a parent waiting, set it READY
     if(current->parent->task_state == SCHED_SLEEPING){
-        printf("ALDSJSDA\n");
         current->parent->task_state = SCHED_READY;
     }
 
@@ -356,13 +344,8 @@ int sched_wait(int *exit_code){
 
     // If there are no ZOMBIE children
     // Put to sleep and switch
-    // BUG HERE?!
-    int bh = 0;
-    if((bh=savectx(&(current->ctx))) != SCHED_IN){
-        printf("%d\n", bh);
-        current->task_state = SCHED_SLEEPING;
-        sched_switch();
-    }
+    current->task_state = SCHED_SLEEPING;
+    sched_switch();
 
     // There should be dead child(ren) by here now
     // Same code as above
@@ -446,8 +429,7 @@ void sched_ps(int blah){
 }
 
 int sched_switch(){
-    printf("currently in %d\n", current->pid);
-    sched_ps(0);
+    //sched_ps(0);
     sigset_t origset; // Original set of signals that were blocked
 
     // Block all signals
