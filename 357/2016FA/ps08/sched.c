@@ -14,7 +14,7 @@ struct savectx exited; // Context to be used when init_fn 'returns'
 sigset_t blockset; // Set of signals to block
 
 void print_test(){
-    printf("Hello world!\n");
+    printf("Hello world! -Init\n");
 
     for(int i = 0; i < 5; i++){
         switch(sched_fork()){
@@ -28,7 +28,11 @@ void print_test(){
                 else if(sched_getpid() == 6) sched_nice(-4);
                 else if(sched_getpid() == 4){
                     if(sched_fork()){
+                        sched_ps(0);
                         sched_exit(101);
+                    }else if(sched_fork()){
+                        sched_ps(0);
+                        sched_exit(102);
                     }
                 }
                 break;
@@ -45,6 +49,7 @@ void print_test(){
         while((pa = sched_wait(&ret)) != -1){
             printf("Child process %d returned %d\n", pa, ret);
         }
+        printf("All my children are dead! :)\n");
     }else{
         while(current->ticks < (current->pid*5)+20){}
         sched_exit(sched_getpid());
