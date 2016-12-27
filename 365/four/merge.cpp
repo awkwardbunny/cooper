@@ -1,8 +1,6 @@
 /*********************************
  * Brian (Seok hyeon) Hong
- * DSA II Assignment #4
- * Professor Sable
- * 
+ * DSA II Assignment #4 * Professor Sable * 
  * Dynamic programming to check
  * whether given is a merge of
  * two other words.
@@ -45,7 +43,8 @@ int main(){
     string s_a, s_b, s_c; // for strings A, B, and C (merged)
     int n_a, n_b, n_c;
 
-    while(!f_in.eof()){
+    int n = 1;
+    while(n && !f_in.eof()){
         f_in >> s_a >> s_b >> s_c;
         
         if(f_in.eof())
@@ -68,6 +67,7 @@ int main(){
 
         for(int j = 0; j <= n_a; j++){
             for(int i = 0; i <= n_b; i++){
+                /*
                 if(i == 0 && j == 0)
                     continue;
                 
@@ -83,6 +83,16 @@ int main(){
                     matrix[i][j] = matrix[i][j-1];
                 }else if(s_a[j-1] == s_c[i+j-1] && s_b[i-1] == s_c[i+j-1]){
                     matrix[i][j] = (matrix[i][j-1] || matrix[i-1][j]);
+                }
+                */
+
+                if(matrix[i][j]){
+                    if(s_a[j] == s_c[i+j] && !matrix[i][j+1] && j < 1000){
+                        matrix[i][j+1] = 1;
+                    }
+                    if(s_b[i] == s_c[i+j] && i < 1000){
+                        matrix[i+1][j] = 1;
+                    }
                 }
             }
         }
@@ -109,23 +119,44 @@ int main(){
         // Build the output string backwards as we find our path back up
         int i = n_b;
         int j = n_a;
-        while(i+j){ //lazy or
+        int bleh = 0;
+        stack_output.push('\0');
+        while(i || j){
             if(i && j){
                 // Check to the left (i-1) first to give priority to string A
                 //(if both path are possible)
                 if(matrix[i-1][j])
-                    stack_output.push(tolower(s_b[--i]));
+                    stack_output.push(s_b[--i]);
                 else if(matrix[i][j-1])
                     stack_output.push(toupper(s_a[--j]));
-                else
-                    cout << "I don't think this line should run... Error?" << endl;
+                else{
+                    cout << "Unreacheable statement, but like last time, I may be wrong... ERROR!" << endl;
+                    bleh = 1;
+                    break;
+                }
             }else if(j){
                 if(matrix[i][j-1])
                     stack_output.push(toupper(s_a[--j]));
+                else{
+                    cout << "Unreacheable statement(1), but like last time, I may be wrong... ERROR!" << endl;
+                    bleh = 1;
+                    break;
+                }
             }else{
                 if(matrix[i-1][j])
-                    stack_output.push(tolower(s_b[--i]));
+                    stack_output.push(s_b[--i]);
+                else{
+                    cout << "Unreacheable statement(2), but like last time, I may be wrong... ERROR!" << endl;
+                    bleh = 1;
+                    break;
+                }
             }
+        }
+
+        if(bleh){
+            cout << "Also should not be running" << endl;
+            f_out << "*** NOT A MERGE ***" << endl;
+            continue;
         }
         
         stringstream ss_out;
@@ -136,5 +167,6 @@ int main(){
         }
 
         f_out << ss_out.str() << endl;
+        //n = 0; // for debugging (while loops one iteration only)
     }
 }
