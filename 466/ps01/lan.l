@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
+#include <limits.h>
 
 /** To be included in a separate header file **/
 #include "ltests/tokens-manual.h"
@@ -175,16 +177,22 @@ int mode = 0;
 		case 'F':
 			yytext[--yyleng] = '\0';
 			yylval.n.f = strtof(yytext, NULL);
+			if(yylval.n.f == HUGE_VAL)
+				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
 			yylval.n.type = NT_FP;
 			break;
 		case 'l':
 		case 'L':
 			yytext[--yyleng] = '\0';
-			yylval.n.ld = strtof(yytext, NULL);
+			yylval.n.ld = strtold(yytext, NULL);
+			if(yylval.n.ld == HUGE_VAL)
+				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
 			yylval.n.type = NT_LDBL;
 			break;
 		default:
-			yylval.n.d = strtof(yytext, NULL);
+			yylval.n.d = strtod(yytext, NULL);
+			if(yylval.n.d == HUGE_VAL)
+				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
 			yylval.n.type = NT_DBL;
 	}
 	return NUMBER;
@@ -199,12 +207,14 @@ L?\' {
 <CHAR>[^\n\'\\]+ {
 	if(!yylval.charlit)
 		yylval.charlit = yytext[0];
+	if(yyleng > 1)
+		fprintf(stderr, "%s:%d:Warning:Unsupported multibyte character literal truncated to first byte\n", filename, line);
 }
 <CHAR>\\ {
 	BEGIN(ESCAPE);
 }
 <CHAR>\n {
-	fprintf(stderr, "Unexpected newline <%s:%d>\n", filename, line);
+	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
 	exit(-1);
 }
 <CHAR>\' {
@@ -226,7 +236,7 @@ L?\" {
 	BEGIN(ESCAPE);
 }
 <STRING>\n {
-	fprintf(stderr, "Unexpected newline <%s:%d>\n", filename, line);
+	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
 	exit(-1);
 }
 <STRING>\" {
@@ -266,7 +276,11 @@ L?\" {
 }
  /** OCTAL */
 <ESCAPE>[0-7]{1,3} {
-	char o = (char)strtol(yytext, NULL, 8);
+	long int l = strtol(yytext, NULL, 8);
+	if(l == LONG_MIN || l == LONG_MAX){
+		fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+	}
+	char o = (char)l;
 	switch(mode){
 		case STRING:
 			mystrcat(&o, 1);
@@ -280,7 +294,12 @@ L?\" {
 
  /** HEX */
 <ESCAPE>[xX][0-9a-fA-F]+ {
-	unsigned char h = (unsigned char)strtol(yytext+1, NULL, 16);
+	long int l = strtol(yytext+1, NULL, 16);
+	unsigned char h = (unsigned char)l;
+	if(l > 0xff){
+		fprintf(stderr, "%s:%d:Warning:Hex escape sequence \\%s out of range\n", filename, line, yytext);
+		h = 0xff;
+	}
 	switch(mode){
 		case STRING:
 			mystrcat(&h, 1);
@@ -300,7 +319,6 @@ void setline(char *yytext){
 }
 
 void mystrcat(char *str, int l){
-	//printf("IN MYSTRCAT");
 	if(yylval.s.length){
 		char *new = (char *)realloc(yylval.s.characters, yylval.s.length+l);
 		if(!new){
@@ -356,27 +374,33 @@ void processint(char *str, int len, int base){
 				str[i] = 0;
 		}
 	}
+	
+	long long int ll = strtoll(str, NULL, base);
+	if(ll == LLONG_MIN || ll == LLONG_MAX){
+		fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+	}
+
 	if(uns){
 		if(longs == 1){
 			yylval.n.type = NT_UL;
-			yylval.n.l = strtoll(str, NULL, base);
+			yylval.n.l = ll;
 		}else if(longs == 2){
 			yylval.n.type = NT_ULL;
-			yylval.n.ll = strtoll(str, NULL, base);
+			yylval.n.ll = ll;
 		}else{
 			yylval.n.type = NT_UINT;
-			yylval.n.i = strtoll(str, NULL, base);
+			yylval.n.i = ll;
 		}
 	}else{
 		if(longs == 1){
 			yylval.n.type = NT_L;
-			yylval.n.l = strtoll(str, NULL, base);
+			yylval.n.l = ll;
 		}else if(longs == 2){
 			yylval.n.type = NT_LL;
-			yylval.n.ll = strtoll(str, NULL, base);
+			yylval.n.ll = ll;
 		}else{
 			yylval.n.type = NT_INT;
-			yylval.n.i = strtoll(str, NULL, base);
+			yylval.n.i = ll;
 		}
 
 	}
