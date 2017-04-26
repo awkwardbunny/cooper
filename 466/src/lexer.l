@@ -58,12 +58,10 @@ int mode = 0;
 unsigned long long int temp_const;
 %}
 
-%x CHAR
-%x STRING
-%x ESCAPE
-%x INT
-%x FP
-%x COMMENT
+%x SC_CHAR
+%x SC_STR
+%x SC_ESC
+%x SC_COMMENT
 %%
 
  /* LINE NUMBERS */
@@ -74,10 +72,10 @@ unsigned long long int temp_const;
 [\t\v\f ]+     { }
 
  /* COMMENTS */
-\/\*            { BEGIN(COMMENT); }
-<COMMENT>.      { }
-<COMMENT>\n     { }
-<COMMENT>\*\/   { BEGIN(0); }
+\/\*            { BEGIN(SC_COMMENT); }
+<SC_COMMENT>.      { }
+<SC_COMMENT>\n     { }
+<SC_COMMENT>\*\/   { BEGIN(0); }
 \/\/.*\n        { }
 
  /* KEYWORDS */
@@ -214,22 +212,22 @@ unsigned long long int temp_const;
 L?\' {
 	yylval.charlit = 0;
 	mode = CHARLIT;
-	BEGIN(CHAR);
+	BEGIN(SC_CHAR);
 }
-<CHAR>[^\n\'\\]+ {
+<SC_CHAR>[^\n\'\\]+ {
 	if(!yylval.charlit)
 		yylval.charlit = yytext[0];
 	if(yyleng > 1)
 		fprintf(stderr, "%s:%d:Warning:Unsupported multibyte character literal truncated to first byte\n", filename, line);
 }
-<CHAR>\\ {
-	BEGIN(ESCAPE);
+<SC_CHAR>\\ {
+	BEGIN(SC_ESC);
 }
-<CHAR>\n {
+<SC_CHAR>\n {
 	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
 	exit(-1);
 }
-<CHAR>\' {
+<SC_CHAR>\' {
 	BEGIN(0);
 	mode = 0;
 	return CHARLIT;
@@ -240,19 +238,19 @@ L?\' {
 L?\" {
 	yylval.s.length = 0;
 	mode = STRING;
-	BEGIN(STRING);
+	BEGIN(SC_STR);
 }
-<STRING>[^\n\"\\]* {
+<SC_STR>[^\n\"\\]* {
 	mystrcat(yytext, yyleng);
 }
-<STRING>\\ {
-	BEGIN(ESCAPE);
+<SC_STR>\\ {
+	BEGIN(SC_ESC);
 }
-<STRING>\n {
+<SC_STR>\n {
 	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
 	exit(-1);
 }
-<STRING>\" {
+<SC_STR>\" {
 	mystrcat(yytext+1, 1);
 	yylval.s.length--;
 	BEGIN(0);
@@ -262,7 +260,7 @@ L?\" {
 
  /* ESCAPE CODES */
  /** CHARACTER */
-<ESCAPE>[ntbrfv\\'"a?] {
+<SC_ESC>[ntbrfv\\'"a?] {
 	char x;
 	switch(yytext[0]){
 		case 'n': x = '\n'; break;
@@ -280,15 +278,15 @@ L?\" {
 	switch(mode){
 		case STRING:
 			mystrcat(&x, 1);
-			BEGIN(STRING);
+			BEGIN(SC_STR);
 			break;
 		case CHARLIT:
 			yylval.charlit = x;
-			BEGIN(CHAR);
+			BEGIN(SC_CHAR);
 	}
 }
  /** OCTAL */
-<ESCAPE>[0-7]{1,3} {
+<SC_ESC>[0-7]{1,3} {
 	long int l = strtol(yytext, NULL, 8);
 	if(l == LONG_MIN || l == LONG_MAX){
 		fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
@@ -297,16 +295,16 @@ L?\" {
 	switch(mode){
 		case STRING:
 			mystrcat(&o, 1);
-			BEGIN(STRING);
+			BEGIN(SC_STR);
 			break;
 		case CHARLIT:
 			yylval.charlit = o;
-			BEGIN(CHAR);
+			BEGIN(SC_CHAR);
 	}
 }
 
  /** HEX */
-<ESCAPE>[xX][0-9a-fA-F]+ {
+<SC_ESC>[xX][0-9a-fA-F]+ {
 	long int l = strtol(yytext+1, NULL, 16);
 	unsigned char h = (unsigned char)l;
 	if(l > 0xff){
@@ -316,11 +314,11 @@ L?\" {
 	switch(mode){
 		case STRING:
 			mystrcat(&h, 1);
-			BEGIN(STRING);
+			BEGIN(SC_STR);
 			break;
 		case CHARLIT:
 			yylval.charlit = h;
-			BEGIN(CHAR);
+			BEGIN(SC_CHAR);
 			break;
 	}
 }

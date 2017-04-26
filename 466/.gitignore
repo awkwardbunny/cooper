@@ -1,3 +1,11 @@
+tags
+
+# Lexer output files
+lex.yy.c
+lexer
+
+# Lexer test files
+ltests/ltest.myerr
+ltests/ltest.myout
 err
 out
-tags
