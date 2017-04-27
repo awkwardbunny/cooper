@@ -6,6 +6,9 @@ includes/parser.tab.h
 src/parser.tab.c
 parser
 
+# Symbol test files
+symtab
+
 # Lexer output files
 lex.yy.c
 lexer

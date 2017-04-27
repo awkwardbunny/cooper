@@ -1,4 +1,5 @@
-//extern int yylineno;
+extern int yylineno;
+extern char filename[];
 
 struct string_literal {
 	unsigned char *characters;
@@ -28,3 +29,6 @@ struct number {
 struct identifier {
 	char *name;
 };
+
+void yyerror(char *s, ...);
+void yywarn(char *s, ...);

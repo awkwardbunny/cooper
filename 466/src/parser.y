@@ -5,9 +5,8 @@
 #include <math.h>
 
 #include <incl.h>
-//#include <parser.tab.h>
+#include <symtab.h>
 
-int yyerror();
 int yylex();
 %}
 
@@ -18,80 +17,30 @@ int yylex();
 	unsigned char charlit;
 }
 
-%token TOKEOF
-%token IDENT
-%token CHARLIT
-%token STRING
-%token NUMBER
-%token INDSEL
-%token PLUSPLUS
-%token MINUSMINUS
-%token SHL
-%token SHR
-%token LTEQ
-%token GTEQ
-%token EQEQ
-%token NOTEQ
-%token LOGAND
-%token LOGOR
-%token ELLIPSIS
-%token TIMESEQ
-%token DIVEQ
-%token MODEQ
-%token PLUSEQ
-%token MINUSEQ
-%token SHLEQ
-%token SHREQ
-%token ANDEQ
-%token OREQ
-%token XOREQ
-%token AUTO
-%token BREAK
-%token CASE
-%token CHAR
-%token CONST
-%token CONTINUE
-%token DEFAULT
-%token DO
-%token DOUBLE
-%token ELSE
-%token ENUM
-%token EXTERN
-%token FLOAT
-%token FOR
-%token GOTO
-%token IF
-%token INLINE
-%token INT
-%token LONG
-%token REGISTER
-%token RESTRICT
-%token RETURN
-%token SHORT
-%token SIGNED
-%token SIZEOF
-%token STATIC
-%token STRUCT
-%token SWITCH
-%token TYPEDEF
-%token UNION
-%token UNSIGNED
-%token VOID
-%token VOLATILE
-%token WHILE
-%token _BOOL
-%token _COMPLEX
-%token _IMAGINARY
+%token TOKEOF IDENT CHARLIT STRING NUMBER INDSEL PLUSPLUS MINUSMINUS SHL SHR LTEQ GTEQ EQEQ NOTEQ LOGAND LOGOR ELLIPSIS TIMESEQ DIVEQ MODEQ PLUSEQ MINUSEQ SHLEQ SHREQ ANDEQ OREQ XOREQ AUTO BREAK CASE CHAR CONST CONTINUE DEFAULT DO DOUBLE ELSE ENUM EXTERN FLOAT FOR GOTO IF INLINE INT LONG REGISTER RESTRICT RETURN SHORT SIGNED SIZEOF STATIC STRUCT SWITCH TYPEDEF UNION UNSIGNED VOID VOLATILE WHILE _BOOL _COMPLEX _IMAGINARY
 
 %%
 
-blah: TOKEOF;
+func: IDENT '(' ')' code_block;
+
+code_block: '{' func_lines '}';
+
+func_lines:	func_line
+		  |	func_lines func_line
+		  ;
+ // Statements also go here
+func_line:	decl
+		 | code_block
+		 ;
+
+decl: INT ident_list ';';
+
+ident_list:	IDENT
+		  | ident_list ',' IDENT
+		  ;
 
 %%
 
 int main(){
 }
 
-int yyerror(){
-
-}

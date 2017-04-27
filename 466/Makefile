@@ -11,6 +11,15 @@ src/parser.tab.c includes/parser.tab.h: src/parser.y
 	@echo Generating parser...
 	@bison -d $< -o src/parser.tab.c --defines=includes/parser.tab.h
 
+# Symbol table test
+symtab: symtabtest/main.c src/symtab.c
+	@echo Building symtab test...
+	@gcc -o $@ $^ $(CFLAGS)
+
+.PHONY: symtabtests
+symtabtests: symtab
+	@./$^
+
 # Lexer
 lexer: src/lex.yy.c
 	@echo Building lexer...
@@ -21,8 +30,6 @@ src/lex.yy.c: src/lexer.l includes/parser.tab.h
 	@flex -l -o $@ $<
 
 # Lexer Tests
-LTESTS = $(wildcard ltests/*.c)
-
 .PHONY: ltests
 ltests ltests/ltest.myout ltests/ltest.myerr: lexer
 	@echo Running tests through lexer...
@@ -39,3 +46,5 @@ clean:
 	@rm -rf ltests/ltest.my{out,err}
 	@echo Removing parser files
 	@rm -rf parse src/parser.tab.c includes/parser.tab.h
+	@echo Removing symtabtest files
+	@rm -rf symtab

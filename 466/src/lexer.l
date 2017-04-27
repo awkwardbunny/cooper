@@ -1,6 +1,7 @@
 %{
 #include <errno.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
@@ -9,7 +10,6 @@
 #include <incl.h>
 #include <parser.tab.h>
 
-int line = 1;
 char filename[64] = "<stdin>";
 
 void mystrcat(char *str, int l);
@@ -26,8 +26,8 @@ unsigned long long int temp_const;
 %%
 
  /* LINE NUMBERS */
-#[ ][0-9]+[ ]\"[^ \"]+\"([ ][1-4])*\n { sscanf(yytext, "# %d \"%62[^\"]+\"", &line, filename); }
-\n                                    { line++; }
+#[ ][0-9]+[ ]\"[^ \"]+\"([ ][1-4])*\n { sscanf(yytext, "# %d \"%62[^\"]+\"", &yylineno, filename); }
+\n                                    { yylineno++; }
 
  /* WHITESPACES */
 [\t\v\f ]+     { }
@@ -148,7 +148,7 @@ unsigned long long int temp_const;
 			yytext[--yyleng] = '\0';
 			yylval.n.f = strtof(yytext, NULL);
 			if(yylval.n.f == HUGE_VAL)
-				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+				yywarn(strerror(errno));
 			yylval.n.type = NT_FP;
 			break;
 		case 'l':
@@ -156,13 +156,13 @@ unsigned long long int temp_const;
 			yytext[--yyleng] = '\0';
 			yylval.n.ld = strtold(yytext, NULL);
 			if(yylval.n.ld == HUGE_VAL)
-				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+				yywarn(strerror(errno));
 			yylval.n.type = NT_LDBL;
 			break;
 		default:
 			yylval.n.d = strtod(yytext, NULL);
 			if(yylval.n.d == HUGE_VAL)
-				fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+				yywarn(strerror(errno));
 			yylval.n.type = NT_DBL;
 	}
 	return NUMBER;
@@ -179,13 +179,13 @@ L?\' {
 	if(!yylval.charlit)
 		yylval.charlit = yytext[0];
 	if(yyleng > 1)
-		fprintf(stderr, "%s:%d:Warning:Unsupported multibyte character literal truncated to first byte\n", filename, line);
+		yywarn("Unsupported multibyte character literal truncated to first byte");
 }
 <SC_CHAR>\\ {
 	BEGIN(SC_ESC);
 }
 <SC_CHAR>\n {
-	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
+	yyerror("Unexpected newline");
 	exit(-1);
 }
 <SC_CHAR>\' {
@@ -208,7 +208,7 @@ L?\" {
 	BEGIN(SC_ESC);
 }
 <SC_STR>\n {
-	fprintf(stderr, "%s:%d:Error:Unexpected newline\n", filename, line);
+	yyerror("Unexpected newline");
 	exit(-1);
 }
 <SC_STR>\" {
@@ -250,7 +250,7 @@ L?\" {
 <SC_ESC>[0-7]{1,3} {
 	long int l = strtol(yytext, NULL, 8);
 	if(l == LONG_MIN || l == LONG_MAX){
-		fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+		yywarn(strerror(errno));
 	}
 	char o = (char)l;
 	switch(mode){
@@ -269,7 +269,7 @@ L?\" {
 	long int l = strtol(yytext+1, NULL, 16);
 	unsigned char h = (unsigned char)l;
 	if(l > 0xff){
-		fprintf(stderr, "%s:%d:Warning:Hex escape sequence \\%s out of range\n", filename, line, yytext);
+		yywarn("Hex escape sequence \\%s out of range", yytext);
 		h = 0xff;
 	}
 	switch(mode){
@@ -342,7 +342,7 @@ void processint(char *str, int len, int base){
 	
 	long long int ll = strtoll(str, NULL, base);
 	if(ll == LLONG_MIN || ll == LLONG_MAX){
-		fprintf(stderr, "%s:%d:Warning:%s\n", filename, line, strerror(errno));
+		 yywarn(strerror(errno));
 	}
 
 	if(longs == 1){
@@ -357,11 +357,27 @@ void processint(char *str, int len, int base){
 	}
 }
 
+void yyerror(char *s, ...){
+	va_list ap;
+	va_start(ap, s);
+
+	fprintf(stderr, "%s:%d: Error: ", filename, yylineno);
+	vfprintf(stderr, s, ap);
+}
+
+void yywarn(char *s, ...){
+	va_list ap;
+	va_start(ap, s);
+
+	fprintf(stderr, "%s:%d: Warning: ", filename, yylineno);
+	vfprintf(stderr, s, ap);
+}
+
 /*
 int main(){
 	int t;
 	while(t = yylex()){
-		printf("%s\t%d\t", filename, line);
+		printf("%s\t%d\t", filename, yylineno);
 		switch(t){
 			case IDENT: printf("IDENT\t%s\n", yylval.id.name); break;
 			case CHARLIT:
