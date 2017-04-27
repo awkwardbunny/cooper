@@ -396,6 +396,7 @@ void processint(char *str, int len, int base){
 	}
 }
 
+/*
 int main(){
 	int t;
 	while(t = yylex()){
@@ -502,3 +503,4 @@ int main(){
 		}
 	}
 }
+*/

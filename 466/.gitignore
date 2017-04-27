@@ -1,6 +1,11 @@
 *.swp
 tags
 
+# Parset output files
+includes/parser.tab.h
+src/parser.tab.c
+parser
+
 # Lexer output files
 lex.yy.c
 lexer
