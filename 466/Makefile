@@ -1,20 +1,22 @@
 all: parser
 
+CFLAGS=-I includes -std=gnu99 -lfl
+
 # Parser
 parser: src/parser.tab.c src/lex.yy.c
 	@echo Building lexer + parser...
-	@gcc -o $@ $^ -I includes -lfl
+	@gcc -o $@ $^ $(CFLAGS)
 
 src/parser.tab.c includes/parser.tab.h: src/parser.y
 	@echo Generating parser...
-	@bison -d $^ -o src/parser.tab.c --defines=includes/parser.tab.h
+	@bison -d $< -o src/parser.tab.c --defines=includes/parser.tab.h
 
 # Lexer
 lexer: src/lex.yy.c
 	@echo Building lexer...
-	@gcc $^ -I includes -std=gnu99 -lfl -o $@
+	@gcc -o $@ $^ $(CFLAGS)
 
-src/lex.yy.c: src/lexer.l
+src/lex.yy.c: src/lexer.l includes/parser.tab.h
 	@echo Generating lexer...
 	@flex -l -o $@ $<
 
